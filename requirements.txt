@@ -1,0 +1,10 @@
+dvc
+mlflow
+opencv-python-headless  # For cv2 in the conversion script
+numpy
+Pillow
+ultralytics             # For YOLOv8 training
+fastapi
+uvicorn
+onnxruntime
+streamlit
