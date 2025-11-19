@@ -1,0 +1,6 @@
+outs:
+- md5: 900089f8c751f6c945649f75afae47a4.dir
+  size: 0
+  nfiles: 4
+  hash: md5
+  path: yolo_dataset
