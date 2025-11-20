@@ -2,7 +2,7 @@
 
 An automated visual inspection system for manufacturing lines, capable of detecting product defects (e.g., broken bottles) in real-time. Built with **YOLOv8**, **ONNX Runtime**, and **MLflow**, simulating an Edge AI deployment workflow.
 
-![Demo Screenshot](path/to/your/screenshot.png) *<-- Add your screenshot here!*
+![Demo Screenshot]("C:\Visual_qc_project\Bad.jpg")("C:\Visual_qc_project\Good.jpg") *<-- Add your screenshot here!*
 
 ## 🚀 Key Features
 * **Defect Detection:** Custom YOLOv8 model trained to detect glass anomalies.
