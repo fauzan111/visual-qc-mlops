@@ -55,7 +55,7 @@ The model was trained for 50 epochs on the MVTec AD (Bottle) dataset.
 ### Factory Operator Dashboard
 The interface allows operators to upload samples and see real-time inference results with confidence scores.
 
-![Dashboard Demo](["C:\Visual_qc_project\Bad.jpg"](https://github.com/fauzan111/visual-qc-mlops/blob/main/docs/Bad.jpg))
+![Dashboard Demo](docs/Bad.jpg)
 
 ---
 
