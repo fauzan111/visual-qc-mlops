@@ -56,7 +56,7 @@ The model was trained for 50 epochs on the MVTec AD (Bottle) dataset.
 The interface allows operators to upload samples and see real-time inference results with confidence scores.
 
 ![Dashboard Demo](docs/Bad.jpg)
-
+![Dashboard Demo](docs/Good.jpg)
 ---
 
 ## 🛠️ Tech Stack
