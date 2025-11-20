@@ -1,0 +1,14 @@
+artifact_uri: mlflow-artifacts:/134766674280678744/a5a7938679364bb381d3acce113480a8/artifacts
+end_time: 1763646438173
+entry_point_name: ''
+experiment_id: '134766674280678744'
+lifecycle_stage: active
+run_id: a5a7938679364bb381d3acce113480a8
+run_name: Manual_Registration
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763646205618
+status: 3
+tags: []
+user_id: fauzan.ejaz

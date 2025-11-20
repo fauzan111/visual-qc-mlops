@@ -1,0 +1,6 @@
+# data.yaml
+path: ./data/yolo_dataset
+train: images/train
+val: images/val
+nc: 1
+names: ['defect']

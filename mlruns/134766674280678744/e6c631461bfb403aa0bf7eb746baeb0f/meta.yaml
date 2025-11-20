@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/134766674280678744/e6c631461bfb403aa0bf7eb746baeb0f/artifacts
+deleted_time: 1763638290560
+end_time: 1763574038568
+entry_point_name: ''
+experiment_id: '134766674280678744'
+lifecycle_stage: deleted
+run_id: e6c631461bfb403aa0bf7eb746baeb0f
+run_name: nosy-trout-356
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763574035783
+status: 4
+tags: []
+user_id: fauzan.ejaz

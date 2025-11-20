@@ -1,0 +1,14 @@
+artifact_uri: mlflow-artifacts:/134766674280678744/82ce013c98ff4b779c64ab9188f1b73e/artifacts
+end_time: 1763643577239
+entry_point_name: ''
+experiment_id: '134766674280678744'
+lifecycle_stage: active
+run_id: 82ce013c98ff4b779c64ab9188f1b73e
+run_name: glamorous-bird-701
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763639612319
+status: 3
+tags: []
+user_id: fauzan.ejaz

@@ -1,223 +1,103 @@
 import os
-import cv2
-import numpy as np
-import shutil
-from pathlib import Path
-from sklearn.model_selection import train_test_split
+import mlflow
+from ultralytics import YOLO
 
 # --- Configuration ---
-# Choose a single category from the MVTec AD dataset for the project
-# Recommended: 'bottle', 'cable', 'metal_nut', or 'pill'
-CATEGORY = 'bottle' 
+# 1. MLflow Tracking URI (Should match your running MLflow UI instance)
+MLFLOW_TRACKING_URI = "http://localhost:5000"
+EXPERIMENT_NAME = "Visual-QC-YOLOv8-MVTec"
+MODEL_NAME = "visual-qc-yolov8"
 
-# Path setup (relative to the project root)
-DATA_ROOT = Path('./data')
-RAW_DIR = DATA_ROOT / 'raw_mvtec' / CATEGORY
-YOLO_DIR = DATA_ROOT / 'yolo_dataset'
+# 2. Data and Model Configuration
+DATA_YAML_PATH = "data.yaml"
+# 'n' for nano (fastest, best for edge); use 's' or 'm' for higher accuracy
+MODEL_SIZE = "yolov8n.pt" 
 
-# Class ID for the defect (YOLO starts class IDs at 0)
-DEFECT_CLASS_ID = 0 
-TEST_SIZE = 0.2 # 20% for validation/testing split
-SEED = 42
+# 3. Training Hyperparameters
+EPOCHS = 50 
+IMG_SIZE = 640
+BATCH_SIZE = 16 
 
-def normalize_bbox(x, y, w, h, img_w, img_h):
-    """
-    Converts pixel (x_min, y_min, x_max, y_max) to normalized YOLO format.
-    YOLO format: <class_id> <x_center> <y_center> <width> <height> (all normalized 0-1)
-    """
-    x_center = (x + w / 2) / img_w
-    y_center = (y + h / 2) / img_h
-    w_norm = w / img_w
-    h_norm = h / img_h
-    return f"{DEFECT_CLASS_ID} {x_center} {y_center} {w_norm} {h_norm}"
-
-def process_mask_to_yolo(image_path, mask_path, label_file):
-    """
-    Loads an image and its defect mask, extracts bounding boxes, and writes 
-    them to a YOLO label file.
-    """
-    # 1. Load image and mask
-    img = cv2.imread(str(image_path))
-    mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-    if img is None or mask is None:
-        print(f"Warning: Could not load image or mask for {image_path.name}")
-        return False
-
-    img_h, img_w, _ = img.shape
+def train_and_log_model():
+    """Trains the YOLOv8 model and logs results and model to MLflow."""
     
-    # 2. Find contours (boundaries of the white defect regions in the mask)
-    # The mask should be a binary image (0 or 255)
-    # RETR_EXTERNAL gets only the outermost contour
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    yolo_annotations = []
+    # 1. Setup MLflow Connection and Experiment
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_experiment(EXPERIMENT_NAME)
 
-    # 3. Process each detected contour
-    for contour in contours:
-        # Calculate the bounding box (x, y, width, height)
-        x, y, w, h = cv2.boundingRect(contour)
+    print(f"Starting MLflow Run in experiment: {EXPERIMENT_NAME}")
+
+    with mlflow.start_run() as run:
+        run_id = run.info.run_id
+        print(f"MLflow Run ID: {run_id}")
+
+        # 2. Log Parameters to MLflow
+        mlflow.log_params({
+            "epochs": EPOCHS,
+            "imgsz": IMG_SIZE,
+            "batch_size": BATCH_SIZE,
+            "model_size": MODEL_SIZE,
+            "data_yaml": DATA_YAML_PATH
+        })
+
+        # 3. Initialize and Train Model
+        print(f"Loading model: {MODEL_SIZE}...")
+        model = YOLO(MODEL_SIZE) 
         
-        # Convert to normalized YOLO format string
-        yolo_line = normalize_bbox(x, y, w, h, img_w, img_h)
-        yolo_annotations.append(yolo_line)
+        print("Starting training...")
+        # Start training
+        results = model.train(
+            data=DATA_YAML_PATH,
+            epochs=EPOCHS,
+            imgsz=IMG_SIZE,
+            batch=BATCH_SIZE,
+            project="runs",
+            name=f"yolo_train_{run_id}",
+            exist_ok=True,
+            verbose=True
+        )
 
-    # 4. Write annotations to the .txt file
-    with open(label_file, 'w') as f:
-        f.write('\n'.join(yolo_annotations))
+        print("Training complete. Logging metrics...")
+
+        # 4. Log Metrics
+        # YOLOv8 stores final validation metrics in the results object
+        metrics = results.metrics if hasattr(results, 'metrics') else results.results_dict
         
-    return len(yolo_annotations) > 0 # Return True if defects were found
+        # Depending on YOLO version, metrics might be accessed differently. 
+        # We try to fetch standard keys safely.
+        if metrics:
+            mlflow.log_metrics({
+                "val/mAP50": metrics.get('metrics/mAP50(B)', 0.0),
+                "val/mAP50-95": metrics.get('metrics/mAP50-95(B)', 0.0),
+                "val/precision": metrics.get('metrics/precision(B)', 0.0),
+                "val/recall": metrics.get('metrics/recall(B)', 0.0)
+            })
 
-def setup_directories():
-    """Sets up the final YOLO directory structure."""
-    print("Setting up YOLO directory structure...")
-    
-    # Define subfolders for the final YOLO dataset
-    subdirs = {
-        'train_img': YOLO_DIR / 'images' / 'train',
-        'val_img': YOLO_DIR / 'images' / 'val',
-        'train_lbl': YOLO_DIR / 'labels' / 'train',
-        'val_lbl': YOLO_DIR / 'labels' / 'val'
-    }
-    
-    # Clean up and recreate the main YOLO folder
-    if YOLO_DIR.exists():
-        shutil.rmtree(YOLO_DIR)
-    
-    # Create all necessary subdirectories
-    for d in subdirs.values():
-        d.mkdir(parents=True, exist_ok=True)
+        # 5. Model Registration
+        # Determine the path where YOLOv8 saves the final model artifact
+        yolo_save_dir = os.path.join("runs", f"yolo_train_{run_id}", "weights")
+        best_model_path = os.path.join(yolo_save_dir, "best.pt")
         
-    return subdirs
-
-def convert_and_split_dataset():
-    """Main function to perform conversion, file copying, and train/val split."""
-    
-    subdirs = setup_directories()
-    
-    # --- Part 1: Gather File Paths ---
-    # Find all defect images and their corresponding masks
-    defect_img_folder = RAW_DIR / 'test'
-    
-    # Dictionary to hold the path pairs: {image_path: mask_path}
-    file_paths = {} 
-    
-    for defect_type_folder in defect_img_folder.iterdir():
-        if not defect_type_folder.is_dir():
-            continue
+        if os.path.exists(best_model_path):
+            print(f"Found best model at: {best_model_path}")
             
-        gt_folder = defect_type_folder / 'ground_truth'
-        
-        # Get all original images for this defect type
-        image_files = list(defect_type_folder.glob('*.png'))
-        
-        for img_path in image_files:
-            # Construct the mask path
-            # Example: '000.png' -> 'ground_truth/000_mask.png'
-            mask_path = gt_folder / f"{img_path.stem}_mask.png"
+            # Log the model artifact directly
+            mlflow.log_artifact(best_model_path, artifact_path="model_artifact")
             
-            if mask_path.exists():
-                file_paths[img_path] = mask_path
-
-    # --- Part 2: Process and Save Annotations ---
-    # Store temporary list of successfully annotated files
-    annotated_files = [] 
-    
-    print(f"\nProcessing {len(file_paths)} defective images for category: {CATEGORY}")
-    
-    for img_path, mask_path in file_paths.items():
-        # Temporary label name in the output structure
-        temp_label_path = YOLO_DIR / 'labels' / f"{img_path.stem}.txt" 
-        
-        # Perform the conversion
-        if process_mask_to_yolo(img_path, mask_path, temp_label_path):
-            annotated_files.append(img_path.stem)
+            # Register the model for versioning
+            mlflow.pytorch.log_model(
+                pytorch_model=model,
+                artifact_path="model",
+                registered_model_name=MODEL_NAME
+            )
+            print(f"Model registered as '{MODEL_NAME}' in MLflow.")
         else:
-            # If no defect was found (e.g., if the ground_truth mask was empty), remove the temporary label file
-            os.remove(temp_label_path) 
-            
-    print(f"Successfully annotated {len(annotated_files)} images with defects.")
-
-    # --- Part 3: Handle Normal (Defect-Free) Images ---
-    # We use defect-free images from the 'train' folder as additional 'no defect' samples.
-    # The label file for these will be empty.
-    normal_img_folder = RAW_DIR / 'train' / 'good'
-    normal_images = list(normal_img_folder.glob('*.png'))
-    
-    for img_path in normal_images:
-        temp_label_path = YOLO_DIR / 'labels' / f"{img_path.stem}.txt"
-        # Create an empty label file for 'good' images
-        with open(temp_label_path, 'w') as f:
-            f.write('') # An empty .txt file means 'no object detected'
-        
-        # Copy the image file to the temporary images folder
-        shutil.copy(img_path, YOLO_DIR / 'images' / f"{img_path.stem}.png")
-        annotated_files.append(img_path.stem)
-        
-    print(f"Added {len(normal_images)} defect-free images as 'no-defect' samples.")
-
-    # --- Part 4: Train/Validation Split and Copying ---
-    all_stems = annotated_files
-    
-    # Perform the split on the list of file names (stems)
-    train_stems, val_stems = train_test_split(
-        all_stems, test_size=TEST_SIZE, random_state=SEED
-    )
-    
-    print(f"\nSplit into: Training ({len(train_stems)}), Validation ({len(val_stems)})")
-
-    # Copy files to final train/val directories
-    def move_files(stems, img_dest, lbl_dest):
-        for stem in stems:
-            # Move Image
-            src_img = YOLO_DIR / 'images' / f"{stem}.png"
-            dst_img = img_dest / f"{stem}.png"
-            shutil.move(src_img, dst_img)
-            
-            # Move Label
-            src_lbl = YOLO_DIR / 'labels' / f"{stem}.txt"
-            dst_lbl = lbl_dest / f"{stem}.txt"
-            shutil.move(src_lbl, dst_lbl)
-
-    # Note: We need to ensure the temporary images and labels folders exist or create them before this step
-    temp_img_folder = YOLO_DIR / 'images'
-    if not temp_img_folder.exists(): temp_img_folder.mkdir(parents=True)
-    temp_lbl_folder = YOLO_DIR / 'labels'
-    if not temp_lbl_folder.exists(): temp_lbl_folder.mkdir(parents=True)
-    
-    # Before the move_files call, we need to ensure the images were copied from RAW_DIR to YOLO_DIR/images
-    # Let's clean up and improve the file copying logic here for clarity.
-    
-    # We will modify the script to copy all files to temporary folders first.
-    # Re-running the file gathering and copying for robustness:
-    all_files_to_split = list(set(file_paths.keys()) | set(normal_images))
-    
-    # 1. Copy all images and create all labels in a flattened structure first
-    # This step is implicitly handled by the previous loops, but let's make it explicit for 'defect' images
-    for img_path, mask_path in file_paths.items(): # Defect images
-        shutil.copy(img_path, YOLO_DIR / 'images' / f"{img_path.stem}.png")
-        
-    # 2. Split and move
-    move_files(train_stems, subdirs['train_img'], subdirs['train_lbl'])
-    move_files(val_stems, subdirs['val_img'], subdirs['val_lbl'])
-    
-    # Clean up the temporary flat structure folders
-    if temp_img_folder.exists():
-        shutil.rmtree(temp_img_folder)
-    if temp_lbl_folder.exists():
-        shutil.rmtree(temp_lbl_folder)
-    
-    print("\nData conversion and split complete. YOLO dataset is ready!")
-
+            print(f"WARNING: Could not find model file at {best_model_path}")
 
 if __name__ == "__main__":
-    # You must manually download the MVTec AD dataset and place the 
-    # chosen category (e.g., 'bottle') folder inside './data/raw_mvtec/' 
-    # before running this script.
-    
-    if not RAW_DIR.exists():
-        print("----------------------------------------------------------------------")
-        print(f"ERROR: Raw data not found at {RAW_DIR}")
-        print("Please download the MVTec AD dataset and place the 'bottle' folder (or your chosen category) inside ./data/raw_mvtec/")
-        print("----------------------------------------------------------------------")
+    # Ensure data.yaml exists
+    if not os.path.exists(DATA_YAML_PATH):
+        print(f"FATAL ERROR: {DATA_YAML_PATH} not found.")
+        print("Please ensure you created the data.yaml file in the project root.")
     else:
-        convert_and_split_dataset()
+        train_and_log_model()

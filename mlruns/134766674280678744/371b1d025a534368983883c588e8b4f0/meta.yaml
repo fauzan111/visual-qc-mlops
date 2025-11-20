@@ -1,0 +1,14 @@
+artifact_uri: mlflow-artifacts:/134766674280678744/371b1d025a534368983883c588e8b4f0/artifacts
+end_time: 1763638887382
+entry_point_name: ''
+experiment_id: '134766674280678744'
+lifecycle_stage: active
+run_id: 371b1d025a534368983883c588e8b4f0
+run_name: shivering-rat-892
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763638833003
+status: 4
+tags: []
+user_id: fauzan.ejaz

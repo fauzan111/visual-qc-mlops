@@ -1,0 +1,14 @@
+artifact_uri: mlflow-artifacts:/134766674280678744/cf5f78c9fa414bf78c798e3828c6289c/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '134766674280678744'
+lifecycle_stage: active
+run_id: cf5f78c9fa414bf78c798e3828c6289c
+run_name: sedate-shrike-258
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763638243620
+status: 1
+tags: []
+user_id: fauzan.ejaz

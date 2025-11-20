@@ -1,0 +1,14 @@
+artifact_uri: mlflow-artifacts:/922614210542888952/cad8904a440641bda8490232c68738bb/artifacts
+end_time: 1763643581955
+entry_point_name: ''
+experiment_id: '922614210542888952'
+lifecycle_stage: active
+run_id: cad8904a440641bda8490232c68738bb
+run_name: trusting-eel-120
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763643577686
+status: 3
+tags: []
+user_id: fauzan.ejaz

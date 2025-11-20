@@ -1,9 +1,9 @@
 dvc
 mlflow
-opencv-python-headless  # For cv2 in the conversion script
+opencv-python-headless 
 numpy
 Pillow
-ultralytics             # For YOLOv8 training
+ultralytics             
 fastapi
 uvicorn
 onnxruntime

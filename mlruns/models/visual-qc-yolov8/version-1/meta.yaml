@@ -1,0 +1,15 @@
+creation_timestamp: 1763646217485
+current_stage: None
+deployment_job_state: null
+description: ''
+last_updated_timestamp: 1763646217485
+model_id: m-f5edbc317e09445a9928e24bef22f803
+name: visual-qc-yolov8
+run_id: a5a7938679364bb381d3acce113480a8
+run_link: ''
+source: models:/m-f5edbc317e09445a9928e24bef22f803
+status: READY
+status_message: null
+storage_location: mlflow-artifacts:/134766674280678744/models/m-f5edbc317e09445a9928e24bef22f803/artifacts
+user_id: null
+version: 1

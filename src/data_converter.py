@@ -1,141 +1,194 @@
-"""Convert MVTec-style masks into YOLO-format label files.
-
-The script expects directories of images and corresponding masks with same filenames
-or a consistent naming pattern (e.g. mask files named with `_mask` suffix). It
-walks `masks_dir` for mask PNGs, finds corresponding images under `images_dir`,
-extracts contours from each mask, computes tight bounding boxes, normalizes them
-to YOLO format, and writes label files plus copies images into a YOLO-style
-folder layout:
-
-    out_dir/
-      images/train
-      images/val
-      labels/train
-      labels/val
-
-Each label file contains one line per detected contour: `0 x_center y_center w h`.
-"""
-from pathlib import Path
-import argparse
-import shutil
-import random
+import os
 import cv2
 import numpy as np
-from .utils import ensure_dir
+import shutil
+import stat
+import sys
+import time
+from pathlib import Path
+from sklearn.model_selection import train_test_split
+import random
 
+# --- Configuration ---
+CATEGORY = 'bottle' 
+DATA_ROOT = Path('./data')
+RAW_DIR = DATA_ROOT / 'raw_mvtec' / CATEGORY
+YOLO_DIR = DATA_ROOT / 'yolo_dataset'
 
-def _find_image_for_mask(mask_path: Path, images_dir: Path, exts=('.png', '.jpg', '.jpeg', '.bmp', '.tif')):
-    """Find an image corresponding to a mask file.
+DEFECT_CLASS_ID = 0 
+TEST_SIZE = 0.2    
+SEED = 42
 
-    Strategy:
-    - If mask filename ends with `_mask` remove suffix and try stem + ext
-    - Try common extensions directly under `images_dir`
-    - Recursively search `images_dir` for a file with the same stem
-    """
-    stem = mask_path.stem
-    if stem.endswith('_mask'):
-        stem = stem[:-5]
+random.seed(SEED)
 
-    for ext in exts:
-        candidate = images_dir / (stem + ext)
-        if candidate.exists():
-            return candidate
+# --- Helper Functions ---
 
-    for p in images_dir.rglob('*'):
-        if p.is_file() and p.stem == stem:
-            return p
+def normalize_bbox(x, y, w, h, img_w, img_h):
+    x_center = (x + w / 2) / img_w
+    y_center = (y + h / 2) / img_h
+    w_norm = w / img_w
+    h_norm = h / img_h
+    return f"{DEFECT_CLASS_ID} {x_center} {y_center} {w_norm} {h_norm}"
 
-    return None
+def process_mask_to_yolo(image_path, mask_path, label_file):
+    img = cv2.imread(str(image_path))
+    mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
+    
+    if img is None or mask is None: 
+        return False
 
+    # --- ROBUST MASK FIX ---
+    max_val = mask.max()
+    if max_val == 0: return True 
+    if max_val <= 1: mask = mask * 255
+    
+    _, mask = cv2.threshold(mask, 10, 255, cv2.THRESH_BINARY)
+    kernel = np.ones((3,3), np.uint8)
+    mask = cv2.dilate(mask, kernel, iterations=1)
 
-def _mask_to_bboxes(mask: np.ndarray, min_area: int = 4):
-    """Return list of bboxes (x_min, y_min, x_max, y_max) for contours in mask."""
-    if mask is None:
-        return []
-    if mask.dtype != np.uint8:
-        mask = mask.astype(np.uint8)
-    _, thresh = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    bboxes = []
-    for c in contours:
-        x, y, w, h = cv2.boundingRect(c)
-        if w * h < min_area:
+    img_h, img_w, _ = img.shape
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    yolo_annotations = []
+
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if w < 2 or h < 2: continue
+        yolo_line = normalize_bbox(x, y, w, h, img_w, img_h)
+        yolo_annotations.append(yolo_line)
+
+    with open(label_file, 'w') as f:
+        f.write('\n'.join(yolo_annotations))
+        
+    if len(yolo_annotations) > 0 and random.random() < 0.05:
+        print(f"DEBUG: Found {len(yolo_annotations)} defect(s) in {image_path.name}")
+
+    return True 
+
+def robust_copy(src, dst):
+    src = Path(src)
+    dst = Path(dst)
+    
+    if dst.exists():
+        try:
+            os.chmod(dst, stat.S_IWRITE)
+            os.remove(dst)
+        except Exception:
+            pass 
+            
+    max_retries = 3
+    for i in range(max_retries):
+        try:
+            shutil.copy2(src, dst)
+            return
+        except PermissionError:
+            if i < max_retries - 1:
+                time.sleep(0.2)
+            else:
+                print(f"Warning: Failed to copy {src.name}")
+
+def on_rm_error(func, path, exc_info):
+    os.chmod(path, stat.S_IWRITE)
+    try:
+        func(path)
+    except Exception:
+        pass
+
+def setup_directories():
+    print("Setting up YOLO directory structure...")
+    subdirs = {
+        'train_img': YOLO_DIR / 'images' / 'train',
+        'val_img': YOLO_DIR / 'images' / 'val',
+        'train_lbl': YOLO_DIR / 'labels' / 'train',
+        'val_lbl': YOLO_DIR / 'labels' / 'val',
+        'temp_img': YOLO_DIR / 'temp_images',
+        'temp_lbl': YOLO_DIR / 'temp_labels'
+    }
+    if YOLO_DIR.exists():
+        try:
+            shutil.rmtree(YOLO_DIR, onerror=on_rm_error)
+        except Exception:
+            pass 
+    for d in subdirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+    return subdirs
+
+def convert_and_split_dataset():
+    subdirs = setup_directories()
+    all_stems = [] 
+    
+    # --- Part 1: Process Defect Images ---
+    defect_img_folder = RAW_DIR / 'test'
+    print(f"\nProcessing defect images for category: {CATEGORY}...")
+    
+    for defect_type_folder in defect_img_folder.iterdir():
+        if not defect_type_folder.is_dir() or defect_type_folder.name == 'good':
             continue
-        bboxes.append((x, y, x + w, y + h))
-    return bboxes
+            
+        gt_folder = RAW_DIR / 'ground_truth' / defect_type_folder.name
+        image_files = list(defect_type_folder.glob('*.png'))
+        
+        for img_path in image_files:
+            # FIX: Add prefix to avoid overwriting (e.g. broken_large_000.png)
+            stem = f"{defect_type_folder.name}_{img_path.stem}"
+            
+            mask_path = gt_folder / f"{img_path.stem}_mask.png"
+            
+            temp_img_path = subdirs['temp_img'] / f"{stem}.png"
+            temp_label_path = subdirs['temp_lbl'] / f"{stem}.txt" 
 
+            if mask_path.exists():
+                process_mask_to_yolo(img_path, mask_path, temp_label_path)
+                robust_copy(img_path, temp_img_path)
+                all_stems.append(stem)
+            
+    print(f"Successfully processed defective images.")
 
-def convert(masks_dir: Path, images_dir: Path, out_dir: Path, split_ratio: float = 0.8, seed: int = 42):
-    masks_dir = Path(masks_dir)
-    images_dir = Path(images_dir)
-    out_dir = Path(out_dir)
+    # --- Part 2: Process Normal Images ---
+    normal_img_folder = RAW_DIR / 'train' / 'good'
+    normal_images = list(normal_img_folder.glob('*.png'))
+    
+    for img_path in normal_images:
+        # FIX: Add 'good' prefix to avoid overwriting
+        stem = f"good_{img_path.stem}"
+        
+        temp_img_path = subdirs['temp_img'] / f"{stem}.png"
+        temp_label_path = subdirs['temp_lbl'] / f"{stem}.txt" 
 
-    images_out_train = out_dir / 'images' / 'train'
-    images_out_val = out_dir / 'images' / 'val'
-    labels_out_train = out_dir / 'labels' / 'train'
-    labels_out_val = out_dir / 'labels' / 'val'
+        with open(temp_label_path, 'w') as f:
+            f.write('')
+        
+        robust_copy(img_path, temp_img_path)
+        all_stems.append(stem)
+        
+    print(f"Added {len(normal_images)} defect-free images. Total unique samples: {len(all_stems)}.")
+    
+    # --- Part 3: Split and Move ---
+    train_stems, val_stems = train_test_split(all_stems, test_size=TEST_SIZE, random_state=SEED)
+    print(f"Split: Train ({len(train_stems)}), Val ({len(val_stems)})")
 
-    for p in [images_out_train, images_out_val, labels_out_train, labels_out_val]:
-        ensure_dir(p)
+    def move_files(stems, img_dest, lbl_dest):
+        for stem in stems:
+            src_img = subdirs['temp_img'] / f"{stem}.png"
+            dst_img = img_dest / f"{stem}.png"
+            robust_copy(src_img, dst_img)
+            
+            src_lbl = subdirs['temp_lbl'] / f"{stem}.txt"
+            dst_lbl = lbl_dest / f"{stem}.txt"
+            robust_copy(src_lbl, dst_lbl)
 
-    mask_files = sorted([p for p in masks_dir.rglob('*.png')])
-    if not mask_files:
-        print(f'No mask files found in {masks_dir}')
-        return
+    move_files(train_stems, subdirs['train_img'], subdirs['train_lbl'])
+    move_files(val_stems, subdirs['val_img'], subdirs['val_lbl'])
+    
+    try:
+        shutil.rmtree(subdirs['temp_img'], onerror=on_rm_error)
+        shutil.rmtree(subdirs['temp_lbl'], onerror=on_rm_error)
+    except Exception:
+        pass
+    
+    print("\nData conversion complete!")
 
-    pairs = []
-    for mask in mask_files:
-        img = _find_image_for_mask(mask, images_dir)
-        if img is None:
-            print(f'Warning: no image found for mask {mask}; skipping')
-            continue
-        pairs.append((mask, img))
-
-    random.Random(seed).shuffle(pairs)
-    split_idx = int(len(pairs) * split_ratio)
-
-    for i, (mask_path, img_path) in enumerate(pairs):
-        img = cv2.imread(str(img_path))
-        if img is None:
-            print(f'Failed to read image {img_path}; skipping')
-            continue
-        mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-        if mask is None:
-            print(f'Failed to read mask {mask_path}; skipping')
-            continue
-
-        h, w = img.shape[:2]
-        bboxes = _mask_to_bboxes(mask)
-        if not bboxes:
-            # no detected defects in mask -> skip
-            continue
-
-        lines = []
-        for (x_min, y_min, x_max, y_max) in bboxes:
-            x_center = (x_min + x_max) / 2.0 / w
-            y_center = (y_min + y_max) / 2.0 / h
-            width = (x_max - x_min) / float(w)
-            height = (y_max - y_min) / float(h)
-            lines.append(f"0 {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}")
-
-        if i < split_idx:
-            target_img = images_out_train / img_path.name
-            target_lbl = labels_out_train / (img_path.stem + '.txt')
-        else:
-            target_img = images_out_val / img_path.name
-            target_lbl = labels_out_val / (img_path.stem + '.txt')
-
-        shutil.copy2(img_path, target_img)
-        with open(target_lbl, 'w') as f:
-            f.write('\n'.join(lines) + '\n')
-
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--masks_dir', required=True, help='Root directory of mask files (may contain subfolders)')
-    parser.add_argument('--images_dir', required=True, help='Root directory of original images')
-    parser.add_argument('--out_dir', required=True, help='Output YOLO dataset directory')
-    parser.add_argument('--split', type=float, default=0.8, help='Train split ratio (default 0.8)')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed for splitting')
-    args = parser.parse_args()
-    convert(Path(args.masks_dir), Path(args.images_dir), Path(args.out_dir), args.split, args.seed)
+if __name__ == "__main__":
+    if not RAW_DIR.exists():
+        print(f"FATAL ERROR: Raw data not found at {RAW_DIR}")
+    else:
+        convert_and_split_dataset()

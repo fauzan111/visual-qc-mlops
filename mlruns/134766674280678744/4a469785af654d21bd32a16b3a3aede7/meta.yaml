@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/134766674280678744/4a469785af654d21bd32a16b3a3aede7/artifacts
+deleted_time: 1763638290538
+end_time: 1763633146003
+entry_point_name: ''
+experiment_id: '134766674280678744'
+lifecycle_stage: deleted
+run_id: 4a469785af654d21bd32a16b3a3aede7
+run_name: clumsy-bear-169
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763633144773
+status: 4
+tags: []
+user_id: fauzan.ejaz

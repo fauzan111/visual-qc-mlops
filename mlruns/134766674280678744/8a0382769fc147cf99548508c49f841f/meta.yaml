@@ -1,0 +1,14 @@
+artifact_uri: mlflow-artifacts:/134766674280678744/8a0382769fc147cf99548508c49f841f/artifacts
+end_time: 1763639517959
+entry_point_name: ''
+experiment_id: '134766674280678744'
+lifecycle_stage: active
+run_id: 8a0382769fc147cf99548508c49f841f
+run_name: burly-kit-622
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763639343574
+status: 4
+tags: []
+user_id: fauzan.ejaz
